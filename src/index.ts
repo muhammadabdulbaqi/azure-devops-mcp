@@ -17,6 +17,7 @@ import { configureAllTools } from "./tools.js";
 import { UserAgentComposer } from "./useragent.js";
 import { packageVersion } from "./version.js";
 import { DomainsManager } from "./shared/domains.js";
+import { wrapServerForEjentoInboundBearer } from "./ejento/wrapServerForEjentoContext.js";
 
 function isGitHubCodespaceEnv(): boolean {
   return process.env.CODESPACES === "true" && !!process.env.CODESPACE_NAME;
@@ -47,12 +48,16 @@ const argv = yargs(hideBin(process.argv))
     alias: "a",
     describe: "Type of authentication to use",
     type: "string",
-    choices: ["interactive", "azcli", "env", "envvar"],
+    choices: ["interactive", "azcli", "env", "envvar", "header", "ejento"],
     default: defaultAuthenticationType,
   })
   .option("tenant", {
     alias: "t",
     describe: "Azure tenant ID (optional, applied when using 'interactive' and 'azcli' type of authentication)",
+    type: "string",
+  })
+  .option("token-path", {
+    describe: "Path to file containing the bearer token (used with 'header' authentication type)",
     type: "string",
   })
   .help()
@@ -103,8 +108,13 @@ async function main() {
   server.server.oninitialized = () => {
     userAgentComposer.appendMcpClientInfo(server.server.getClientVersion());
   };
+
+  if (argv.authentication === "ejento") {
+    wrapServerForEjentoInboundBearer(server.server);
+  }
+
   const tenantId = (await getOrgTenant(orgName)) ?? argv.tenant;
-  const authenticator = createAuthenticator(argv.authentication, tenantId);
+  const authenticator = createAuthenticator(argv.authentication, tenantId, argv.tokenPath as string | undefined);
 
   // removing prompts untill further notice
   // configurePrompts(server);

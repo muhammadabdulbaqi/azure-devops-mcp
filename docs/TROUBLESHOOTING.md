@@ -90,6 +90,21 @@ For automated scenarios or when you want to use a token stored in an environment
    npx @azure-devops/mcp myorg --authentication envvar
    ```
 
+##### File-backed header token authentication
+
+If you want MCP to load a token from a file at runtime, use the `header` authentication type with `--token-path` or `ADO_MCP_AUTH_TOKEN_PATH`:
+
+```bash
+npx @azure-devops/mcp myorg --authentication header --token-path /tmp/ado-token
+```
+
+or:
+
+```bash
+export ADO_MCP_AUTH_TOKEN_PATH="/tmp/ado-token"
+npx @azure-devops/mcp myorg --authentication header
+```
+
 3. **For MCP configuration files, update your `.vscode/mcp.json`:**
    ```json
    {

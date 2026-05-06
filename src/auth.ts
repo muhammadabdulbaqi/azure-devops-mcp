@@ -2,9 +2,11 @@
 // Licensed under the MIT License.
 
 import { AzureCliCredential, ChainedTokenCredential, DefaultAzureCredential, TokenCredential } from "@azure/identity";
+import { promises as fs } from "fs";
 import { AccountInfo, AuthenticationResult, PublicClientApplication } from "@azure/msal-node";
 import open from "open";
 import { logger } from "./logger.js";
+import { ejentoMcpContext } from "./ejento/ejentoMcpContext.js";
 
 const scopes = ["499b84ac-1321-427f-aa17-267ca6975798/.default"];
 
@@ -75,8 +77,8 @@ class OAuthAuthenticator {
   }
 }
 
-function createAuthenticator(type: string, tenantId?: string): () => Promise<string> {
-  logger.debug(`Creating authenticator of type '${type}' with tenantId='${tenantId ?? "undefined"}'`);
+function createAuthenticator(type: string, tenantId?: string, tokenPath?: string): () => Promise<string> {
+  logger.debug(`Creating authenticator of type '${type}' with tenantId='${tenantId ?? "undefined"}' and tokenPath='${tokenPath ?? "undefined"}'`);
   switch (type) {
     case "envvar":
       logger.debug(`Authenticator: Using environment variable authentication (ADO_MCP_AUTH_TOKEN)`);
@@ -112,6 +114,46 @@ function createAuthenticator(type: string, tenantId?: string): () => Promise<str
         }
         logger.debug(`${type}: Successfully obtained Azure DevOps token`);
         return result.token;
+      };
+
+    case "ejento":
+      logger.debug(`Authenticator: Using per-request bearer from params._meta.adoAccessToken (Ejento gateway + OAuth)`);
+      return async () => {
+        const meta = ejentoMcpContext.getStore();
+        const token = meta?.adoAccessToken;
+        if (typeof token === "string" && token.length > 0) {
+          logger.debug(`ejento: Using adoAccessToken from request _meta (length ${token.length})`);
+          return token;
+        }
+        logger.error(`ejento: Missing params._meta.adoAccessToken — ensure ejento-supergateway forwards Authorization: Bearer`);
+        throw new Error(
+          "Ejento authentication requires params._meta.adoAccessToken (forward Authorization: Bearer via ejento-supergateway), or use envvar/header for static tokens.",
+        );
+      };
+
+    case "header":
+      logger.debug(`Authenticator: Using file-backed header token authentication`);
+      const resolvedTokenPath = tokenPath || process.env["ADO_MCP_AUTH_TOKEN_PATH"];
+      if (!resolvedTokenPath) {
+        logger.error(`header: Token path is not provided and ADO_MCP_AUTH_TOKEN_PATH environment variable is not set`);
+        throw new Error("authentication='header' requires either --token-path option or ADO_MCP_AUTH_TOKEN_PATH environment variable to be set.");
+      }
+      return async () => {
+        logger.debug(`header: Reading token from file path: ${resolvedTokenPath}`);
+        try {
+          const token = await fs.readFile(resolvedTokenPath, "utf-8");
+          const trimmedToken = token.trim();
+          if (!trimmedToken) {
+            logger.error(`header: Token file is empty or contains only whitespace`);
+            throw new Error(`Token file at '${resolvedTokenPath}' is empty or contains only whitespace.`);
+          }
+          logger.debug(`header: Successfully read token from file, length: ${trimmedToken.length}`);
+          return trimmedToken;
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          logger.error(`header: Failed to read token file from ${resolvedTokenPath}: ${errorMsg}`);
+          throw new Error(`Failed to read bearer token from '${resolvedTokenPath}': ${errorMsg}`);
+        }
       };
 
     default:
